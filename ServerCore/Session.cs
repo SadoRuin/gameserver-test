@@ -53,8 +53,6 @@ public class Session
         byte[] buff = _sendQueue.Dequeue();
         _sendArgs.SetBuffer(buff, 0, buff.Length);
         
-        _sendArgs.BufferList
-        
         bool pending = _socket.SendAsync(_sendArgs);
         if(pending == false)
             OnSendCompleted(null, _sendArgs);
