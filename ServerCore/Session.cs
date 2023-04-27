@@ -10,7 +10,7 @@ public class Session
 
     private object _lock = new();
     private Queue<byte[]> _sendQueue = new();
-    private bool _pending = false;
+    private List<ArraySegment<byte>> _pendingList = new();
     private SocketAsyncEventArgs _sendArgs = new(); 
     private SocketAsyncEventArgs _recvArgs = new();
     
@@ -30,7 +30,7 @@ public class Session
         lock (_lock)
         {
             _sendQueue.Enqueue(sendBuff);
-            if(_pending == false)
+            if(_pendingList.Count == 0)
                 RegisterSend();
         }
         
@@ -49,9 +49,13 @@ public class Session
 
     void RegisterSend()
     {
-        _pending = true;
-        byte[] buff = _sendQueue.Dequeue();
-        _sendArgs.SetBuffer(buff, 0, buff.Length);
+        while (_sendQueue.Count > 0)
+        {
+            byte[] buff = _sendQueue.Dequeue();
+            _pendingList.Add(new ArraySegment<byte>(buff , 0, buff.Length));
+        }
+
+        _sendArgs.BufferList = _pendingList;
         
         bool pending = _socket.SendAsync(_sendArgs);
         if(pending == false)
@@ -66,10 +70,13 @@ public class Session
             {
                 try
                 {
+                    _sendArgs.BufferList = null;
+                    _pendingList.Clear();
+
+                    Console.WriteLine($"Transferred bytes: {_sendArgs.BytesTransferred}");
+                    
                     if (_sendQueue.Count > 0)
                         RegisterSend();
-                    else 
-                        _pending = false;
                 }
                 catch (Exception e)
                 {
