@@ -3,6 +3,38 @@ using System.Net.Sockets;
 
 namespace ServerCore;
 
+public abstract class PacketSession : Session
+{
+    public static readonly int HeaderSize = 2;
+    
+    // [size(2)][packetId(2)][ ... ][size(2)][packetId(2)][ ... ]
+    public sealed override int OnRecv(ArraySegment<byte> buffer)
+    {
+        int processLen = 0;
+
+        while (true)
+        {
+            // 최소한 헤더는 파싱할 수 있는지 확인
+            if (buffer.Count < HeaderSize)
+                break;
+            
+            // 패킷이 완전체로 도착했는지 확인
+            var dataSize = BitConverter.ToUInt16(buffer.Array, buffer.Offset);
+            if (buffer.Count < dataSize)
+                break;
+
+            // 여기까지 왔으면 패킷 조립 가능
+            OnRecvPacket(new ArraySegment<byte>(buffer.Array, buffer.Offset, dataSize));
+
+            processLen += dataSize;
+            buffer = new ArraySegment<byte>(buffer.Array, buffer.Offset + dataSize, buffer.Count - dataSize);
+        }
+        return processLen;
+    }
+
+    public abstract void OnRecvPacket(ArraySegment<byte> buffer);
+}
+
 public abstract class Session
 {
     private Socket _socket;
@@ -11,7 +43,7 @@ public abstract class Session
     private RecvBuffer _recvBuffer = new(1024);
 
     private object _lock = new();
-    private Queue<byte[]> _sendQueue = new();
+    private Queue<ArraySegment<byte>> _sendQueue = new();
     private List<ArraySegment<byte>> _pendingList = new();
     private SocketAsyncEventArgs _sendArgs = new(); 
     private SocketAsyncEventArgs _recvArgs = new();
@@ -34,7 +66,7 @@ public abstract class Session
         RegisterRecv();
     }
 
-    public void Send(byte[] sendBuff)
+    public void Send(ArraySegment<byte> sendBuff)
     {
         lock (_lock)
         {
@@ -61,8 +93,8 @@ public abstract class Session
     {
         while (_sendQueue.Count > 0)
         {
-            byte[] buff = _sendQueue.Dequeue();
-            _pendingList.Add(new ArraySegment<byte>(buff , 0, buff.Length));
+            var buff = _sendQueue.Dequeue();
+            _pendingList.Add(buff);
         }
 
         _sendArgs.BufferList = _pendingList;
@@ -138,7 +170,6 @@ public abstract class Session
                     return;
                 }
                 
-                OnRecv(new ArraySegment<byte>(args.Buffer, args.Offset, args.BytesTransferred));
                 RegisterRecv();
             }
             catch (Exception e)
